@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────
+# VjCloudBank — API Gateway Deployment
+# ─────────────────────────────────────────────
+# The API Gateway is the ONLY service with a LoadBalancer
+# All other services use ClusterIP (internal only)
+# ─────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+  namespace: vjcloudbank
+  labels:
+    app: api-gateway
+    version: "1.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api-gateway
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: api-gateway
+    spec:
+      containers:
+        - name: api-gateway
+          image: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/api-gateway:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3000"
+            - name: RATE_LIMIT_WINDOW_MS
+              value: "60000"
+            - name: RATE_LIMIT_MAX_REQUESTS
+              value: "100"
+            # Kubernetes internal DNS — services talk to each other by name
+            - name: USER_SERVICE_URL
+              value: "http://user-service.vjcloudbank.svc.cluster.local:3001"
+            - name: ACCOUNT_SERVICE_URL
+              value: "http://account-service.vjcloudbank.svc.cluster.local:3002"
+            - name: TRANSACTION_SERVICE_URL
+              value: "http://transaction-service.vjcloudbank.svc.cluster.local:3003"
+            - name: NOTIFICATION_SERVICE_URL
+              value: "http://notification-service.vjcloudbank.svc.cluster.local:3004"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: api-gateway-secrets
+                  key: JWT_SECRET
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "250m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+# LoadBalancer — creates an AWS ALB accessible from internet
+# This is the ONLY internet-facing service
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+  namespace: vjcloudbank
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+spec:
+  selector:
+    app: api-gateway
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3000
+  type: LoadBalancer

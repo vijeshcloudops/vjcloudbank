@@ -1,0 +1,99 @@
+# ─────────────────────────────────────────────
+# VjCloudBank — Transaction Service Deployment
+# ─────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transaction-service
+  namespace: vjcloudbank
+  labels:
+    app: transaction-service
+    version: "1.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: transaction-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: transaction-service
+    spec:
+      containers:
+        - name: transaction-service
+          image: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/transaction-service:latest
+          ports:
+            - containerPort: 3003
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: "production"
+            - name: PORT
+              value: "3003"
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-secrets
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-secrets
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-secrets
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-secrets
+                  key: DB_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: transaction-service-secrets
+                  key: JWT_SECRET
+          resources:
+            requests:
+              memory: "512Mi"    # Java needs more memory
+              cpu: "200m"
+            limits:
+              memory: "1024Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /api/transactions/health
+              port: 3003
+            initialDelaySeconds: 60   # Java takes longer to start
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/transactions/health
+              port: 3003
+            initialDelaySeconds: 45
+            periodSeconds: 15
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: transaction-service
+  namespace: vjcloudbank
+spec:
+  selector:
+    app: transaction-service
+  ports:
+    - protocol: TCP
+      port: 3003
+      targetPort: 3003
+  type: ClusterIP

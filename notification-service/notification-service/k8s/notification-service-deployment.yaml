@@ -1,0 +1,78 @@
+# ─────────────────────────────────────────────
+# VjCloudBank — Notification Service Deployment
+# ─────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: vjcloudbank
+  labels:
+    app: notification-service
+    version: "1.0"
+spec:
+  replicas: 1       # Only 1 replica needed — stateless notification sender
+  selector:
+    matchLabels:
+      app: notification-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      containers:
+        - name: notification-service
+          image: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/notification-service:latest
+          ports:
+            - containerPort: 3004
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "3004"
+            - name: USE_MOCK_NOTIFICATIONS
+              value: "false"      # Use real AWS SES/SNS in production
+            - name: AWS_REGION
+              value: "ap-south-1"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: notification-service-secrets
+                  key: JWT_SECRET
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          livenessProbe:
+            httpGet:
+              path: /api/notifications/health
+              port: 3004
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/notifications/health
+              port: 3004
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: vjcloudbank
+spec:
+  selector:
+    app: notification-service
+  ports:
+    - protocol: TCP
+      port: 3004
+      targetPort: 3004
+  type: ClusterIP

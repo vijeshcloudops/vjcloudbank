@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────
+# .gitignore for NeoBank Account Service
+# ─────────────────────────────────────────────
+
+# Never commit — contains real passwords!
+.env
+*.env.local
+
+# Python virtual environment
+venv/
+env/
+.venv/
+
+# Python compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
