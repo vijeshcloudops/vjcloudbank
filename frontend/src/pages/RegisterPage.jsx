@@ -38,12 +38,19 @@ export default function RegisterPage() {
       setSuccess('Account created! Redirecting to login...');
       setTimeout(() => navigate('/login'), 1500);
     } catch (err) {
-      const errors = err.response?.data?.errors;
-      if (errors) {
-        setError(errors.map(e => e.msg).join(', '));
-      } else {
-        setError(err.response?.data?.message || 'Registration failed.');
+      // Surface the actual backend error instead of a generic message
+      const resp = err.response?.data;
+      let msg = 'Registration failed.';
+
+      if (resp?.errors && Array.isArray(resp.errors) && resp.errors.length > 0) {
+        // express-validator errors: array of { msg, path, ... }
+        msg = resp.errors.map(e => e.msg).join(' ');
+      } else if (resp?.message) {
+        msg = resp.message;
+      } else if (err.message) {
+        msg = err.message;
       }
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -56,23 +63,26 @@ export default function RegisterPage() {
           <div style={s.logoText}>VjCloudBank</div>
           <div style={s.logoSub}>Create your account</div>
         </div>
+
         {error   && <div style={s.error}>{error}</div>}
         {success && <div style={s.success}>{success}</div>}
+
         <form onSubmit={handleSubmit}>
           <label style={s.label}>Full name</label>
-          <input style={s.input} name="full_name" value={form.full_name}
-            onChange={handleChange} placeholder="Raj Kumar" required />
+          <input style={s.input} name="full_name" value={form.full_name} onChange={handleChange} required />
+
           <label style={s.label}>Email address</label>
-          <input style={s.input} type="email" name="email" value={form.email}
-            onChange={handleChange} placeholder="raj@example.com" required />
+          <input style={s.input} type="email" name="email" value={form.email} onChange={handleChange} required />
+
           <label style={s.label}>Password</label>
-          <input style={s.input} type="password" name="password" value={form.password}
-            onChange={handleChange} placeholder="Min 8 chars, 1 uppercase, 1 number" required />
-          <div style={s.hint}>e.g. SecurePass1</div>
-          <button style={s.btn} type="submit" disabled={loading}>
+          <input style={s.input} type="password" name="password" value={form.password} onChange={handleChange} required minLength={8} />
+          <div style={s.hint}>Min 8 chars, must include 1 uppercase letter and 1 number. e.g. SecurePass1</div>
+
+          <button type="submit" style={s.btn} disabled={loading}>
             {loading ? 'Creating account...' : 'Create account'}
           </button>
         </form>
+
         <div style={s.footer}>
           Already have an account? <Link to="/login" style={s.link}>Sign in</Link>
         </div>

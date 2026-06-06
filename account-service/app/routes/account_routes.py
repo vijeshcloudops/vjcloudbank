@@ -1,5 +1,5 @@
 # app/routes/account_routes.py
-# Sync version - no async/await needed with psycopg2
+# Production version using asyncpg
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
@@ -11,13 +11,12 @@ router = APIRouter(prefix="/api/accounts", tags=["Accounts"])
 
 
 @router.get("/health")
-def health_check():
+async def health_check():
     from app.config.database import get_db
-    conn = get_db()
+    pool = get_db()
     try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        cursor.close()
+        async with pool.acquire() as conn:
+            await conn.execute("SELECT 1")
         return {"success": True, "service": "account-service", "status": "healthy"}
     except Exception:
         return JSONResponse(
@@ -27,11 +26,11 @@ def health_check():
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-def create_account(
+async def create_account(
     request: CreateAccountRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    account = account_controller.create_account(
+    account = await account_controller.create_account(
         user_id=current_user["userId"],
         request=request
     )
@@ -43,10 +42,10 @@ def create_account(
 
 
 @router.get("")
-def list_my_accounts(
+async def list_my_accounts(
     current_user: dict = Depends(get_current_user)
 ):
-    accounts = account_controller.get_all_accounts(
+    accounts = await account_controller.get_all_accounts(
         user_id=current_user["userId"]
     )
     return {
@@ -57,11 +56,11 @@ def list_my_accounts(
 
 
 @router.get("/{account_id}")
-def get_account(
+async def get_account(
     account_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    account = account_controller.get_account_by_id(
+    account = await account_controller.get_account_by_id(
         account_id=account_id,
         user_id=current_user["userId"]
     )
@@ -69,11 +68,11 @@ def get_account(
 
 
 @router.get("/{account_id}/balance")
-def get_balance(
+async def get_balance(
     account_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    balance = account_controller.get_balance(
+    balance = await account_controller.get_balance(
         account_id=account_id,
         user_id=current_user["userId"]
     )
@@ -81,11 +80,11 @@ def get_balance(
 
 
 @router.patch("/{account_id}/close")
-def close_account(
+async def close_account(
     account_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    account = account_controller.close_account(
+    account = await account_controller.close_account(
         account_id=account_id,
         user_id=current_user["userId"]
     )

@@ -1,5 +1,5 @@
 # app/main.py
-# Sync version using psycopg2 (Windows compatible)
+# Production version using asyncpg
 
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -16,10 +16,10 @@ load_dotenv()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     print("\n🚀 Starting VjCloudBank Account Service...")
-    connect_db()   # sync call — no await needed
+    await connect_db()
     yield
     print("\n🛑 Shutting down Account Service...")
-    disconnect_db()
+    await disconnect_db()
 
 
 app = FastAPI(
@@ -68,5 +68,5 @@ if __name__ == "__main__":
         "app.main:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", 3002)),
-        reload=True
+        reload=False
     )
