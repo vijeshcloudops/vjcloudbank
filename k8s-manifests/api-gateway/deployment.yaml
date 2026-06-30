@@ -1,8 +1,9 @@
 # ─────────────────────────────────────────────
 # VjCloudBank — API Gateway Deployment
 # ─────────────────────────────────────────────
-# The API Gateway is the ONLY service with a LoadBalancer
-# All other services use ClusterIP (internal only)
+# Phase 7b: Service changed from LoadBalancer (NLB) to ClusterIP.
+# Internet access now via the Ingress resource in ingress.yaml,
+# provisioned as an ALB by the AWS Load Balancer Controller.
 # ─────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
@@ -13,7 +14,7 @@ metadata:
     app: api-gateway
     version: "1.0"
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: api-gateway
@@ -41,7 +42,6 @@ spec:
               value: "60000"
             - name: RATE_LIMIT_MAX_REQUESTS
               value: "100"
-            # Kubernetes internal DNS — services talk to each other by name
             - name: USER_SERVICE_URL
               value: "http://user-service.vjcloudbank.svc.cluster.local:3001"
             - name: ACCOUNT_SERVICE_URL
@@ -75,21 +75,18 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
 ---
-# LoadBalancer — creates an AWS ALB accessible from internet
-# This is the ONLY internet-facing service
+# Service — ClusterIP only (internal). External access via Ingress.
 apiVersion: v1
 kind: Service
 metadata:
   name: api-gateway
   namespace: vjcloudbank
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
 spec:
+  type: ClusterIP
   selector:
     app: api-gateway
   ports:
-    - protocol: TCP
+    - name: http
+      protocol: TCP
       port: 80
       targetPort: 3000
-  type: LoadBalancer
