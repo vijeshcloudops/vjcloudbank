@@ -8,7 +8,7 @@ echo "===== [1/10] Update system packages ====="
 dnf update -y
 
 echo "===== [2/10] Install base tools ====="
-dnf install -y java-17-amazon-corretto git wget curl unzip jq
+dnf install -y java-21-amazon-corretto git wget unzip jq
 
 echo "===== [3/10] Install Docker ====="
 dnf install -y docker
@@ -27,7 +27,7 @@ echo "===== [6/10] Install amazon-efs-utils ====="
 dnf install -y amazon-efs-utils
 
 echo "===== [7/10] Mount EFS at /var/lib/jenkins ====="
-EFS_DNS="fs-0bcd093e21e140a4d.efs.ap-south-1.amazonaws.com"
+EFS_DNS="fs-07c79c3c35aa479e8.efs.ap-south-1.amazonaws.com"
 
 # Create the mount point
 mkdir -p /var/lib/jenkins
