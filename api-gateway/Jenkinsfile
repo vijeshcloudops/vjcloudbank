@@ -1,0 +1,131 @@
+pipeline {
+    agent {
+        kubernetes {
+            cloud 'vjcloudbank-eks'
+            defaultContainer 'node'
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: jenkins-agents
+  labels:
+    app: jenkins-agent
+    service: api-gateway
+spec:
+  serviceAccountName: jenkins
+  restartPolicy: Never
+  containers:
+    - name: jnlp
+      image: jenkins/inbound-agent:latest
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+    - name: node
+      image: node:20-alpine
+      command:
+        - sleep
+      args:
+        - infinity
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "512Mi"
+        limits:
+          cpu: "1500m"
+          memory: "2Gi"
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:v1.23.2-debug
+      command:
+        - sleep
+      args:
+        - infinity
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "512Mi"
+        limits:
+          cpu: "1500m"
+          memory: "2Gi"
+'''
+        }
+    }
+
+    environment {
+        SERVICE_DIR     = 'api-gateway'
+        PROJECT_KEY     = 'vjcloudbank-api-gateway'
+        AWS_REGION      = 'ap-south-1'
+        AWS_ACCOUNT_ID  = '135808958462'
+        ECR_REPO        = 'vjcloudbank/api-gateway'
+        ECR_REGISTRY    = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Show workspace') {
+            steps {
+                container('jnlp') {
+                    sh 'pwd && ls -la'
+                    sh 'ls -la ${SERVICE_DIR} || echo "SERVICE_DIR not found"'
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                container('node') {
+                    sh 'apk add --no-cache openjdk17-jre'
+                    script {
+                        def scannerHome = tool 'sonar-scanner-5'
+                        withSonarQubeEnv('vjcloudbank-sonar') {
+                            sh """
+                                ${scannerHome}/bin/sonar-scanner \\
+                                  -Dsonar.projectKey=${PROJECT_KEY} \\
+                                  -Dsonar.projectName=${PROJECT_KEY} \\
+                                  -Dsonar.projectBaseDir=\${WORKSPACE}/${SERVICE_DIR} \\
+                                  -Dsonar.sources=. \\
+                                  -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.test.js,**/dist/**,**/build/** \\
+                                  -Dsonar.sourceEncoding=UTF-8
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build and Push Image') {
+            steps {
+                container('kaniko') {
+                    sh '''
+                        /kaniko/executor \
+                          --context=${WORKSPACE}/${SERVICE_DIR} \
+                          --dockerfile=${WORKSPACE}/${SERVICE_DIR}/Dockerfile \
+                          --destination=${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG} \
+                          --destination=${ECR_REGISTRY}/${ECR_REPO}:latest \
+                          --verbosity=info
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "api-gateway pipeline PASSED. Image: ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
+        }
+        failure {
+            echo "api-gateway pipeline FAILED"
+        }
+    }
+}
