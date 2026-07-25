@@ -1,0 +1,144 @@
+pipeline {
+    agent {
+        kubernetes {
+            cloud 'vjcloudbank-eks'
+            defaultContainer 'maven'
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: jenkins-agents
+  labels:
+    app: jenkins-agent
+    service: transaction-service
+spec:
+  serviceAccountName: jenkins
+  restartPolicy: Never
+  containers:
+    - name: jnlp
+      image: jenkins/inbound-agent:latest
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+    - name: maven
+      image: maven:3.9.6-eclipse-temurin-17
+      command:
+        - sleep
+      args:
+        - infinity
+      resources:
+        requests:
+          cpu: "500m"
+          memory: "1Gi"
+        limits:
+          cpu: "2000m"
+          memory: "3Gi"
+      volumeMounts:
+        - name: maven-cache
+          mountPath: /root/.m2
+    - name: kaniko
+      image: gcr.io/kaniko-project/executor:v1.23.2-debug
+      command:
+        - sleep
+      args:
+        - infinity
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "512Mi"
+        limits:
+          cpu: "1500m"
+          memory: "2Gi"
+  volumes:
+    - name: maven-cache
+      emptyDir: {}
+'''
+        }
+    }
+
+    environment {
+        SERVICE_DIR     = 'transaction-service'
+        PROJECT_KEY     = 'vjcloudbank-transaction-service'
+        AWS_REGION      = 'ap-south-1'
+        AWS_ACCOUNT_ID  = '135808958462'
+        ECR_REPO        = 'vjcloudbank/transaction-service'
+        ECR_REGISTRY    = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+    }
+
+    stages {
+        stage('Show workspace') {
+            steps {
+                container('jnlp') {
+                    sh 'pwd && ls -la'
+                    sh 'ls -la ${SERVICE_DIR} || echo "SERVICE_DIR not found"'
+                }
+            }
+        }
+
+        stage('Maven Compile') {
+            steps {
+                container('maven') {
+                    dir("${SERVICE_DIR}") {
+                        sh 'mvn -B -DskipTests compile'
+                    }
+                }
+            }
+        }
+
+        stage('SonarQube Analysis') {
+            steps {
+                container('maven') {
+                    dir("${SERVICE_DIR}") {
+                        withSonarQubeEnv('vjcloudbank-sonar') {
+                            sh '''
+                                mvn -B sonar:sonar \
+                                  -Dsonar.projectKey=${PROJECT_KEY} \
+                                  -Dsonar.projectName=${PROJECT_KEY} \
+                                  -Dsonar.host.url=${SONAR_HOST_URL} \
+                                  -Dsonar.login=${SONAR_AUTH_TOKEN} \
+                                  -Dsonar.exclusions=**/target/**,**/*.class,**/generated-sources/**
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 8, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        stage('Build and Push Image') {
+            steps {
+                container('kaniko') {
+                    sh '''
+                        /kaniko/executor \
+                          --context=${WORKSPACE}/${SERVICE_DIR} \
+                          --dockerfile=${WORKSPACE}/${SERVICE_DIR}/Dockerfile \
+                          --destination=${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG} \
+                          --destination=${ECR_REGISTRY}/${ECR_REPO}:latest \
+                          --verbosity=info
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "transaction-service pipeline PASSED. Image: ${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
+        }
+        failure {
+            echo "transaction-service pipeline FAILED"
+        }
+    }
+}
