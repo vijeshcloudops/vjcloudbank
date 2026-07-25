@@ -96,7 +96,7 @@ spec:
                     dir("${SERVICE_DIR}") {
                         withSonarQubeEnv('vjcloudbank-sonar') {
                             sh '''
-                                mvn -B sonar:sonar \
+                                mvn -B org.sonarsource.scanner.maven:sonar-maven-plugin:3.10.0.2594:sonar \
                                   -Dsonar.projectKey=${PROJECT_KEY} \
                                   -Dsonar.projectName=${PROJECT_KEY} \
                                   -Dsonar.host.url=${SONAR_HOST_URL} \
