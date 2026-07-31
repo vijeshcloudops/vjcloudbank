@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-sandbox-config
+data:
+  index.html: |
+    <html>
+    <body>
+    <h1>ArgoCD Sandbox Test</h1>
+    <p>Deployed via ArgoCD from Git</p>
+    </body>
+    </html>

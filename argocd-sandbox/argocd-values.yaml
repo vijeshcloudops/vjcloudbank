@@ -1,0 +1,45 @@
+# Minimal ArgoCD Helm values for sandbox
+# Everything default except explicit overrides for sandbox scope
+
+global:
+  domain: localhost
+
+# Server config
+server:
+  service:
+    type: ClusterIP
+  extraArgs:
+    - --insecure  # Sandbox only — accepts HTTP internally (port-forward uses HTTPS via cert-forward)
+  
+# Controller — single replica for sandbox
+controller:
+  replicas: 1
+
+# Repo server — single replica for sandbox
+repoServer:
+  replicas: 1
+
+# ApplicationSet controller — enable for later testing
+applicationSet:
+  enabled: true
+  replicas: 1
+
+# Notifications — disabled for sandbox
+notifications:
+  enabled: false
+
+# Dex (SSO) — disabled for sandbox
+dex:
+  enabled: false
+
+# Redis — single replica for sandbox
+redis:
+  enabled: true
+
+# HA off (default)
+redis-ha:
+  enabled: false
+
+# CRDs — install
+crds:
+  install: true
