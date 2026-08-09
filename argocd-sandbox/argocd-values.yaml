@@ -1,16 +1,19 @@
-# Minimal ArgoCD Helm values for sandbox
-# Everything default except explicit overrides for sandbox scope
+# ArgoCD Helm values for sandbox
+# Chart version: 7.x (argo-cd)
 
 global:
   domain: localhost
+
+# Config params — this is where server.insecure actually goes in 7.x
+configs:
+  params:
+    server.insecure: true
 
 # Server config
 server:
   service:
     type: ClusterIP
-  extraArgs:
-    - --insecure  # Sandbox only — accepts HTTP internally (port-forward uses HTTPS via cert-forward)
-  
+
 # Controller — single replica for sandbox
 controller:
   replicas: 1

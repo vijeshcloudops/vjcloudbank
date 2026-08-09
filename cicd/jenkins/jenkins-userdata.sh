@@ -27,7 +27,7 @@ echo "===== [6/10] Install amazon-efs-utils ====="
 dnf install -y amazon-efs-utils
 
 echo "===== [7/10] Mount EFS at /var/lib/jenkins ====="
-EFS_DNS="fs-07cc40240161b77d6.efs.ap-south-1.amazonaws.com"
+EFS_DNS="fs-07bc8ffd4aeed729c.efs.ap-south-1.amazonaws.com"
 
 # Create the mount point
 mkdir -p /var/lib/jenkins
