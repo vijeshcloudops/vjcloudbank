@@ -1,0 +1,62 @@
+# Default values for microservice chart
+# Override per-service via values files in manifests/values/
+
+# Required
+name: ""              # Service name (e.g. "user-service")
+image:
+  repository: ""      # Full ECR repo path
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+# Deployment
+replicaCount: 2
+strategy:
+  type: RollingUpdate
+  maxSurge: 1
+  maxUnavailable: 0
+
+# Container
+port: 8080
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "250m"
+
+# Environment variables (non-sensitive)
+env: []
+  # - name: NODE_ENV
+  #   value: "production"
+
+# Secret references (K8s Secret must exist in namespace)
+# Format: list of maps with envName, secretName, secretKey
+secretEnv: []
+  # - envName: DB_HOST
+  #   secretName: user-service-secrets
+  #   secretKey: DB_HOST
+
+# Health checks
+livenessProbe:
+  enabled: true
+  path: /health
+  port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  failureThreshold: 3
+
+readinessProbe:
+  enabled: true
+  path: /health
+  port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  failureThreshold: 3
+
+# Service
+service:
+  type: ClusterIP           # or LoadBalancer
+  port: 8080
+  targetPort: 8080
+  annotations: {}           # e.g. for NLB

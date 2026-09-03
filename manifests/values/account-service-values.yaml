@@ -1,0 +1,60 @@
+name: account-service
+image:
+  repository: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/account-service
+  tag: latest
+
+replicaCount: 2
+port: 3002
+
+resources:
+  requests:
+    memory: "256Mi"
+    cpu: "100m"
+  limits:
+    memory: "512Mi"
+    cpu: "250m"
+
+env:
+  - name: APP_ENV
+    value: "production"
+  - name: PORT
+    value: "3002"
+
+secretEnv:
+  - envName: DB_HOST
+    secretName: account-service-secrets
+    secretKey: DB_HOST
+  - envName: DB_PORT
+    secretName: account-service-secrets
+    secretKey: DB_PORT
+  - envName: DB_NAME
+    secretName: account-service-secrets
+    secretKey: DB_NAME
+  - envName: DB_USER
+    secretName: account-service-secrets
+    secretKey: DB_USER
+  - envName: DB_PASSWORD
+    secretName: account-service-secrets
+    secretKey: DB_PASSWORD
+  - envName: JWT_SECRET
+    secretName: account-service-secrets
+    secretKey: JWT_SECRET
+
+livenessProbe:
+  enabled: true
+  path: /api/accounts/health
+  port: 3002
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+readinessProbe:
+  enabled: true
+  path: /api/accounts/health
+  port: 3002
+  initialDelaySeconds: 15
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+  port: 3002
+  targetPort: 3002

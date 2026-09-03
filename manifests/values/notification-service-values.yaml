@@ -1,0 +1,49 @@
+name: notification-service
+image:
+  repository: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/notification-service
+  tag: latest
+
+replicaCount: 1
+port: 3004
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "200m"
+
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "3004"
+  - name: USE_MOCK_NOTIFICATIONS
+    value: "false"
+  - name: AWS_REGION
+    value: "ap-south-1"
+
+secretEnv:
+  - envName: JWT_SECRET
+    secretName: notification-service-secrets
+    secretKey: JWT_SECRET
+
+livenessProbe:
+  enabled: true
+  path: /api/notifications/health
+  port: 3004
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+readinessProbe:
+  enabled: true
+  path: /api/notifications/health
+  port: 3004
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+  port: 3004
+  targetPort: 3004

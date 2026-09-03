@@ -1,0 +1,60 @@
+name: api-gateway
+image:
+  repository: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/api-gateway
+  tag: latest
+
+replicaCount: 2
+port: 3000
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "250m"
+
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "3000"
+  - name: RATE_LIMIT_WINDOW_MS
+    value: "60000"
+  - name: RATE_LIMIT_MAX_REQUESTS
+    value: "100"
+  - name: USER_SERVICE_URL
+    value: "http://user-service.vjcloudbank.svc.cluster.local:3001"
+  - name: ACCOUNT_SERVICE_URL
+    value: "http://account-service.vjcloudbank.svc.cluster.local:3002"
+  - name: TRANSACTION_SERVICE_URL
+    value: "http://transaction-service.vjcloudbank.svc.cluster.local:3003"
+  - name: NOTIFICATION_SERVICE_URL
+    value: "http://notification-service.vjcloudbank.svc.cluster.local:3004"
+
+secretEnv:
+  - envName: JWT_SECRET
+    secretName: api-gateway-secrets
+    secretKey: JWT_SECRET
+
+livenessProbe:
+  enabled: true
+  path: /health
+  port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+readinessProbe:
+  enabled: true
+  path: /health
+  port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+service:
+  type: LoadBalancer
+  port: 80
+  targetPort: 3000
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+    service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"

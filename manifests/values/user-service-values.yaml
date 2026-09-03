@@ -1,0 +1,63 @@
+name: user-service
+image:
+  repository: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/user-service
+  tag: latest
+
+replicaCount: 2
+port: 3001
+
+resources:
+  requests:
+    memory: "128Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "250m"
+
+env:
+  - name: NODE_ENV
+    value: "production"
+  - name: PORT
+    value: "3001"
+
+secretEnv:
+  - envName: DB_HOST
+    secretName: user-service-secrets
+    secretKey: DB_HOST
+  - envName: DB_PORT
+    secretName: user-service-secrets
+    secretKey: DB_PORT
+  - envName: DB_NAME
+    secretName: user-service-secrets
+    secretKey: DB_NAME
+  - envName: DB_USER
+    secretName: user-service-secrets
+    secretKey: DB_USER
+  - envName: DB_PASSWORD
+    secretName: user-service-secrets
+    secretKey: DB_PASSWORD
+  - envName: JWT_SECRET
+    secretName: user-service-secrets
+    secretKey: JWT_SECRET
+  - envName: JWT_EXPIRES_IN
+    secretName: user-service-secrets
+    secretKey: JWT_EXPIRES_IN
+
+livenessProbe:
+  enabled: true
+  path: /api/users/health
+  port: 3001
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+readinessProbe:
+  enabled: true
+  path: /api/users/health
+  port: 3001
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+service:
+  type: ClusterIP
+  port: 3001
+  targetPort: 3001
