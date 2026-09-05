@@ -3,7 +3,7 @@ image:
   repository: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/account-service
   tag: latest
 
-replicaCount: 2
+replicaCount: 1
 port: 3002
 
 resources:
