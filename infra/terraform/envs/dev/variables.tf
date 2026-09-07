@@ -46,3 +46,34 @@ variable "availability_zones" {
   type        = list(string)
   default     = ["ap-south-1a", "ap-south-1b"]
 }
+
+variable "admin_ip_cidr" {
+  description = "Admin IP CIDR for SSH access to Jenkins/Sonar (your public IP with /32)"
+  type        = string
+  # No default — must be set in terraform.tfvars
+}
+
+variable "vpc_cni_version" {
+  description = "VPC CNI addon version"
+  type        = string
+}
+
+variable "coredns_version" {
+  description = "CoreDNS addon version"
+  type        = string
+}
+
+variable "kube_proxy_version" {
+  description = "kube-proxy addon version"
+  type        = string
+}
+
+variable "ebs_csi_version" {
+  description = "AWS EBS CSI Driver addon version"
+  type        = string
+}
+
+variable "db_engine_version" {
+  description = "PostgreSQL engine version"
+  type        = string
+}
