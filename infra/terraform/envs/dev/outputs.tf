@@ -128,3 +128,40 @@ output "ecr_repository_urls" {
   description = "ECR repository URLs by service"
   value       = module.ecr.repository_urls
 }
+
+# EFS outputs
+output "efs_file_system_id" {
+  description = "EFS file system ID"
+  value       = module.efs.file_system_id
+}
+
+output "efs_dns_name" {
+  description = "EFS DNS name for mount commands"
+  value       = module.efs.dns_name
+}
+
+# CI/CD outputs
+output "cicd_alb_dns_name" {
+  description = "CI/CD ALB DNS name (for Jenkins UI + webhook)"
+  value       = module.cicd.alb_dns_name
+}
+
+output "jenkins_url" {
+  description = "Jenkins UI URL"
+  value       = "http://${module.cicd.alb_dns_name}:8080"
+}
+
+output "sonarqube_url" {
+  description = "SonarQube UI URL"
+  value       = "http://${module.cicd.alb_dns_name}:9000"
+}
+
+output "jenkins_asg_name" {
+  description = "Jenkins ASG name (scale up: aws autoscaling set-desired-capacity ...)"
+  value       = module.cicd.jenkins_asg_name
+}
+
+output "sonar_asg_name" {
+  description = "Sonar ASG name"
+  value       = module.cicd.sonar_asg_name
+}

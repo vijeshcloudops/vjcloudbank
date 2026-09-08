@@ -88,3 +88,33 @@ module "ecr" {
   project_name = var.project_name
   environment  = var.environment
 }
+
+# EFS — Jenkins persistent state
+module "efs" {
+  source = "../../modules/efs"
+
+  project_name   = var.project_name
+  environment    = var.environment
+  cicd_subnet_id = module.vpc.cicd_subnet_id
+  efs_sg_id      = module.security.efs_sg_id
+}
+
+# CI/CD tier — Jenkins + Sonar (Launch Templates, ASGs, ALB)
+module "cicd" {
+  source = "../../modules/cicd"
+
+  project_name                  = var.project_name
+  environment                   = var.environment
+  vpc_id                        = module.vpc.vpc_id
+  public_subnet_ids             = module.vpc.public_subnet_ids
+  cicd_subnet_id                = module.vpc.cicd_subnet_id
+  cicd_alb_sg_id                = module.security.cicd_alb_sg_id
+  jenkins_sg_id                 = module.security.jenkins_sg_id
+  sonar_sg_id                   = module.security.sonar_sg_id
+  jenkins_instance_profile_name = module.iam.jenkins_instance_profile_name
+  sonar_instance_profile_name   = module.iam.sonar_instance_profile_name
+  efs_file_system_id            = module.efs.file_system_id
+  efs_dns_name                  = module.efs.dns_name
+  sonar_db_endpoint             = module.rds.sonar_db_endpoint
+  sonar_db_secret_arn           = module.rds.sonar_db_secret_arn
+}
