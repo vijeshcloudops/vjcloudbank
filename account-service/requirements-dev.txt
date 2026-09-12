@@ -1,17 +1,17 @@
-# ─────────────────────────────────────────────
-# requirements-dev.txt — Windows local development only
-# ─────────────────────────────────────────────
-# Use this file on Windows instead of requirements.txt
-# to avoid the C++ compilation issue with asyncpg.
+# requirements-dev.txt
 #
-# Install with:  pip install -r requirements-dev.txt
-# Production Docker still uses requirements.txt (asyncpg on Linux)
+# Test-only dependencies. Not installed in production image.
+# CI installs these separately after installing requirements.txt.
 
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-psycopg2-binary==2.9.9
-pydantic==2.5.3
-pydantic-settings==2.1.0
-python-jose[cryptography]==3.3.0
-python-dotenv==1.0.0
+# Test runner + async support
+pytest==8.0.0
+pytest-asyncio==0.23.5
+
+# Coverage measurement — outputs xml (Sonar) + html
+pytest-cov==4.1.0
+
+# For mocking AsyncMock in a clean way (already in stdlib but pin for stability)
+# Nothing extra needed — unittest.mock covers async
+
+# HTTP client for future integration tests
 httpx==0.26.0

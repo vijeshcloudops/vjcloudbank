@@ -1,3 +1,18 @@
+// user-service/Jenkinsfile
+//
+// Commit pipeline for user-service (Node.js + Express)
+// Stages:
+//   1. Show workspace          — sanity check
+//   2. Install dependencies    — npm ci (deterministic install)
+//   3. Unit tests + coverage   — Jest with lcov + junit output
+//   4. SonarQube Analysis      — SAST + coverage import
+//   5. Quality Gate            — enforce Sonar Quality Gate rules
+//   6. Build and Push Image    — kaniko to ECR
+//
+// Test artifacts published to Jenkins:
+//   - JUnit XML for pass/fail visualization (Test Results tab)
+//   - HTML coverage report for browsing
+
 pipeline {
     agent {
         kubernetes {
@@ -74,6 +89,56 @@ spec:
             }
         }
 
+        stage('Install dependencies') {
+            steps {
+                container('node') {
+                    dir("${SERVICE_DIR}") {
+                        // npm ci = clean install from package-lock.json — reproducible
+                        // Faster than npm install and won't modify lock file
+                        sh 'npm ci'
+                    }
+                }
+            }
+        }
+
+        stage('Unit tests') {
+            steps {
+                container('node') {
+                    dir("${SERVICE_DIR}") {
+                        // Run Jest with coverage + JUnit XML output
+                        // JEST_JUNIT_OUTPUT_FILE controls where junit.xml is written
+                        // '|| true' avoids stopping the pipeline here — junit + coverage
+                        // publishers below make the results visible either way
+                        sh '''
+                            npm test -- \
+                              --coverage \
+                              --coverageReporters=lcov \
+                              --coverageReporters=cobertura \
+                              --coverageReporters=text-summary \
+                              --reporters=default \
+                              --reporters=jest-junit
+                        '''
+                    }
+                }
+            }
+            post {
+                always {
+                    // Publish JUnit results — visible in Jenkins Test Result tab
+                    junit testResults: "${SERVICE_DIR}/junit.xml", allowEmptyResults: false
+
+                    // Publish HTML coverage report
+                    publishHTML target: [
+                        allowMissing: false,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: "${SERVICE_DIR}/coverage/lcov-report",
+                        reportFiles: 'index.html',
+                        reportName: 'Coverage Report — user-service'
+                    ]
+                }
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
                 container('node') {
@@ -86,8 +151,11 @@ spec:
                                   -Dsonar.projectKey=${PROJECT_KEY} \\
                                   -Dsonar.projectName=${PROJECT_KEY} \\
                                   -Dsonar.projectBaseDir=\${WORKSPACE}/${SERVICE_DIR} \\
-                                  -Dsonar.sources=. \\
+                                  -Dsonar.sources=src \\
+                                  -Dsonar.tests=tests \\
                                   -Dsonar.exclusions=**/node_modules/**,**/coverage/**,**/*.test.js,**/dist/**,**/build/** \\
+                                  -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \\
+                                  -Dsonar.testExecutionReportPaths=junit.xml \\
                                   -Dsonar.sourceEncoding=UTF-8
                             """
                         }

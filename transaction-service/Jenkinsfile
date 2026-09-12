@@ -1,3 +1,14 @@
+// transaction-service/Jenkinsfile
+//
+// Commit pipeline for transaction-service (Java + Spring Boot)
+// Stages:
+//   1. Show workspace
+//   2. Maven Compile
+//   3. Unit tests + JaCoCo coverage
+//   4. SonarQube Analysis (with coverage import)
+//   5. Quality Gate
+//   6. Build and Push Image (kaniko)
+
 pipeline {
     agent {
         kubernetes {
@@ -90,6 +101,35 @@ spec:
             }
         }
 
+        stage('Unit tests') {
+            steps {
+                container('maven') {
+                    dir("${SERVICE_DIR}") {
+                        // 'mvn test' runs surefire plugin (JUnit 5) + JaCoCo
+                        // Outputs:
+                        //   target/surefire-reports/*.xml    — JUnit results
+                        //   target/site/jacoco/jacoco.xml    — coverage for Sonar
+                        sh 'mvn -B test'
+                    }
+                }
+            }
+            post {
+                always {
+                    junit testResults: "${SERVICE_DIR}/target/surefire-reports/*.xml",
+                          allowEmptyResults: false
+
+                    publishHTML target: [
+                        allowMissing: true,
+                        alwaysLinkToLastBuild: true,
+                        keepAll: true,
+                        reportDir: "${SERVICE_DIR}/target/site/jacoco",
+                        reportFiles: 'index.html',
+                        reportName: 'Coverage Report — transaction-service'
+                    ]
+                }
+            }
+        }
+
         stage('SonarQube Analysis') {
             steps {
                 container('maven') {
@@ -101,6 +141,8 @@ spec:
                                   -Dsonar.projectName=${PROJECT_KEY} \
                                   -Dsonar.host.url=${SONAR_HOST_URL} \
                                   -Dsonar.login=${SONAR_AUTH_TOKEN} \
+                                  -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml \
+                                  -Dsonar.junit.reportPaths=target/surefire-reports \
                                   -Dsonar.exclusions=**/target/**,**/*.class,**/generated-sources/**
                             '''
                         }
