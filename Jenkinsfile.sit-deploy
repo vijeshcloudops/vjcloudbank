@@ -1,0 +1,414 @@
+// Jenkinsfile.sit-deploy
+//
+// SIT DEPLOYMENT PIPELINE
+// ═══════════════════════════════════════════════════════════════
+//
+// Purpose:
+//   Deploy one or more microservices to the SIT environment and
+//   run smoke tests to validate the deployment.
+//
+// Ownership (DevOps SPOC narrative):
+//   - DevOps (me) owns this pipeline, the manifest updates, and
+//     the deployment coordination
+//   - QA team owns the smoke test collection (tests/postman/)
+//   - Release coordinator triggers this pipeline when they want
+//     new features on SIT for QA testing
+//
+// Trigger:
+//   Manual — Jenkins "Build with Parameters"
+//   Release coordinator picks which services to deploy and what
+//   image tags to use.
+//
+// What it does:
+//   1. Update image tags in manifests/values/<service>-values.yaml
+//   2. Commit + push to manifest repo (Git = source of truth)
+//   3. ArgoCD auto-syncs from Git → deploys new images to SIT
+//   4. Pipeline waits for rollout to complete
+//   5. Runs QA's Newman smoke test suite against SIT
+//   6. Publishes results as JUnit XML in Jenkins
+//
+// ═══════════════════════════════════════════════════════════════
+
+pipeline {
+    agent {
+        kubernetes {
+            cloud 'vjcloudbank-eks'
+            defaultContainer 'tools'
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  namespace: jenkins-agents
+  labels:
+    app: jenkins-agent
+    pipeline: sit-deploy
+spec:
+  serviceAccountName: jenkins
+  restartPolicy: Never
+  containers:
+    - name: jnlp
+      image: jenkins/inbound-agent:latest
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+    - name: tools
+      # Custom-friendly image with git, curl, yq, kubectl already available
+      # In real BFSI we would maintain our own base image; alpine + adds works
+      # for portfolio scope
+      image: alpine/k8s:1.28.3
+      command:
+        - sleep
+      args:
+        - infinity
+      resources:
+        requests:
+          cpu: "200m"
+          memory: "512Mi"
+        limits:
+          cpu: "1000m"
+          memory: "1Gi"
+    - name: newman
+      # Postman's newman + reporters, ready to run collections
+      image: postman/newman:5.3-alpine
+      command:
+        - sleep
+      args:
+        - infinity
+      resources:
+        requests:
+          cpu: "100m"
+          memory: "256Mi"
+        limits:
+          cpu: "500m"
+          memory: "512Mi"
+'''
+        }
+    }
+
+    parameters {
+        choice(
+            name: 'TARGET_ENV',
+            choices: ['sit'],
+            description: 'Target environment (currently SIT only)'
+        )
+        string(
+            name: 'USER_SERVICE_TAG',
+            defaultValue: '',
+            description: 'Image tag for user-service (leave blank to skip)'
+        )
+        string(
+            name: 'ACCOUNT_SERVICE_TAG',
+            defaultValue: '',
+            description: 'Image tag for account-service (leave blank to skip)'
+        )
+        string(
+            name: 'TRANSACTION_SERVICE_TAG',
+            defaultValue: '',
+            description: 'Image tag for transaction-service (leave blank to skip)'
+        )
+        string(
+            name: 'NOTIFICATION_SERVICE_TAG',
+            defaultValue: '',
+            description: 'Image tag for notification-service (leave blank to skip)'
+        )
+        string(
+            name: 'API_GATEWAY_TAG',
+            defaultValue: '',
+            description: 'Image tag for api-gateway (leave blank to skip)'
+        )
+        string(
+            name: 'FRONTEND_TAG',
+            defaultValue: '',
+            description: 'Image tag for frontend (leave blank to skip)'
+        )
+        booleanParam(
+            name: 'RUN_SMOKE_TESTS',
+            defaultValue: true,
+            description: 'Run Postman smoke tests after deployment?'
+        )
+    }
+
+    environment {
+        MANIFEST_REPO_URL = 'https://github.com/vijeshcloudops/vjcloudbank.git'
+        MANIFEST_BRANCH   = 'main'
+        ARGOCD_NAMESPACE  = 'argocd'
+        SIT_NAMESPACE     = 'sit'
+        // API gateway NLB hostname — captured after ArgoCD sync
+        // Populated dynamically in the "Get SIT endpoint" stage
+        API_GATEWAY_URL   = ''
+    }
+
+    stages {
+
+        stage('Show parameters') {
+            steps {
+                container('jnlp') {
+                    sh '''
+                        echo "═══════════════════════════════════════"
+                        echo "SIT Deployment Parameters"
+                        echo "═══════════════════════════════════════"
+                        echo "Target env:       ${TARGET_ENV}"
+                        echo "user-service:     ${USER_SERVICE_TAG:-<unchanged>}"
+                        echo "account-service:  ${ACCOUNT_SERVICE_TAG:-<unchanged>}"
+                        echo "transaction:      ${TRANSACTION_SERVICE_TAG:-<unchanged>}"
+                        echo "notification:     ${NOTIFICATION_SERVICE_TAG:-<unchanged>}"
+                        echo "api-gateway:      ${API_GATEWAY_TAG:-<unchanged>}"
+                        echo "frontend:         ${FRONTEND_TAG:-<unchanged>}"
+                        echo "Run smoke tests:  ${RUN_SMOKE_TESTS}"
+                        echo "═══════════════════════════════════════"
+                    '''
+                }
+            }
+        }
+
+        stage('Update manifest tags') {
+            steps {
+                container('tools') {
+                    // Configure Git identity for the commit
+                    // Credentials for push must be configured in Jenkins:
+                    //   github-manifest-repo (username + token/PAT)
+                    withCredentials([
+                        usernamePassword(
+                            credentialsId: 'github-manifest-repo',
+                            usernameVariable: 'GIT_USER',
+                            passwordVariable: 'GIT_TOKEN'
+                        )
+                    ]) {
+                        sh '''
+                            set -eux
+
+                            # Clone manifest repo fresh (avoid workspace state issues)
+                            rm -rf manifest-repo
+                            git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/vijeshcloudops/vjcloudbank.git manifest-repo
+                            cd manifest-repo
+
+                            git config user.email "sit-deploy@vjcloudbank.dev"
+                            git config user.name  "SIT Deploy Pipeline"
+
+                            # Function to update image tag for a service
+                            # Uses yq (available in alpine/k8s image) — safe YAML edit
+                            update_tag() {
+                                local service_name="$1"
+                                local new_tag="$2"
+
+                                if [ -z "$new_tag" ]; then
+                                    echo ">>> Skipping ${service_name} (no tag provided)"
+                                    return 0
+                                fi
+
+                                local values_file="manifests/values/${service_name}-values.yaml"
+                                if [ ! -f "$values_file" ]; then
+                                    echo "!!! ${values_file} not found"
+                                    return 1
+                                fi
+
+                                echo ">>> Updating ${service_name} -> ${new_tag}"
+                                yq -i ".image.tag = \\"${new_tag}\\"" "$values_file"
+
+                                # Show the change
+                                grep -A 2 "^image:" "$values_file"
+                                echo "---"
+                            }
+
+                            update_tag "user-service"         "${USER_SERVICE_TAG}"
+                            update_tag "account-service"      "${ACCOUNT_SERVICE_TAG}"
+                            update_tag "transaction-service"  "${TRANSACTION_SERVICE_TAG}"
+                            update_tag "notification-service" "${NOTIFICATION_SERVICE_TAG}"
+                            update_tag "api-gateway"          "${API_GATEWAY_TAG}"
+                            update_tag "frontend"             "${FRONTEND_TAG}"
+
+                            # Check if anything actually changed
+                            if git diff --quiet; then
+                                echo ">>> No changes to commit — all tags were blank or already current"
+                                exit 0
+                            fi
+
+                            git add manifests/values/
+                            git commit -m "SIT deploy #${BUILD_NUMBER}: update image tags
+
+user-service=${USER_SERVICE_TAG:-unchanged}
+account-service=${ACCOUNT_SERVICE_TAG:-unchanged}
+transaction-service=${TRANSACTION_SERVICE_TAG:-unchanged}
+notification-service=${NOTIFICATION_SERVICE_TAG:-unchanged}
+api-gateway=${API_GATEWAY_TAG:-unchanged}
+frontend=${FRONTEND_TAG:-unchanged}
+
+Triggered by: ${BUILD_URL}"
+
+                            git push origin main
+                            echo ">>> Manifests updated + pushed. ArgoCD will auto-sync."
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Wait for ArgoCD sync') {
+            steps {
+                container('tools') {
+                    // ArgoCD auto-sync polls the Git repo every 3 minutes by default.
+                    // We nudge it via CLI for faster feedback + wait for sync completion.
+                    withCredentials([
+                        string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_TOKEN')
+                    ]) {
+                        sh '''
+                            set -eux
+
+                            # Get ArgoCD server URL from Ingress (namespace argocd)
+                            # If ArgoCD is exposed via NLB, use that hostname
+                            ARGOCD_SERVER=$(kubectl -n argocd get svc argocd-server \
+                              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+
+                            if [ -z "$ARGOCD_SERVER" ]; then
+                                # Fall back to port-forward for internal cluster access
+                                ARGOCD_SERVER="argocd-server.argocd.svc.cluster.local"
+                            fi
+
+                            echo ">>> ArgoCD server: ${ARGOCD_SERVER}"
+
+                            # ArgoCD CLI is not in the alpine/k8s image — download it
+                            curl -sSL -o /tmp/argocd \
+                              https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+                            chmod +x /tmp/argocd
+
+                            # Login using auth token
+                            /tmp/argocd login "${ARGOCD_SERVER}" \
+                              --auth-token "${ARGOCD_TOKEN}" \
+                              --insecure \
+                              --grpc-web
+
+                            # List of SIT apps that may need syncing
+                            SIT_APPS="sit-user-service sit-account-service sit-transaction-service \
+                                      sit-notification-service sit-api-gateway sit-frontend"
+
+                            for app in $SIT_APPS; do
+                                echo ">>> Refreshing app: $app"
+                                /tmp/argocd app get "$app" --grpc-web --refresh || true
+
+                                echo ">>> Waiting for sync: $app"
+                                /tmp/argocd app wait "$app" \
+                                  --sync --health \
+                                  --timeout 300 \
+                                  --grpc-web || {
+                                      echo "!!! $app did not reach Healthy+Synced within timeout"
+                                      /tmp/argocd app get "$app" --grpc-web
+                                      exit 1
+                                  }
+                            done
+
+                            echo ">>> All SIT apps are Healthy and Synced"
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Get SIT endpoint') {
+            steps {
+                container('tools') {
+                    // Discover the api-gateway NLB hostname from the SIT namespace
+                    script {
+                        env.API_GATEWAY_URL = sh(
+                            script: '''
+                                # Wait up to 5 min for NLB hostname to be assigned
+                                for i in $(seq 1 30); do
+                                    HOST=$(kubectl -n sit get svc api-gateway \
+                                      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
+                                    if [ -n "$HOST" ]; then
+                                        echo "http://${HOST}"
+                                        exit 0
+                                    fi
+                                    sleep 10
+                                done
+                                echo "!!! Timed out waiting for api-gateway NLB hostname" >&2
+                                exit 1
+                            ''',
+                            returnStdout: true
+                        ).trim()
+
+                        echo "SIT API Gateway URL: ${env.API_GATEWAY_URL}"
+                    }
+                }
+            }
+        }
+
+        stage('Wait for NLB to serve traffic') {
+            steps {
+                container('tools') {
+                    // Even after status shows "Active", NLBs take ~2 min to actually
+                    // pass health checks and start routing traffic. Poll until 200.
+                    sh '''
+                        set -eux
+                        for i in $(seq 1 30); do
+                            STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "${API_GATEWAY_URL}/health" || echo "000")
+                            echo ">>> Attempt $i: health check returned ${STATUS}"
+                            if [ "$STATUS" = "200" ]; then
+                                echo ">>> NLB is serving traffic"
+                                exit 0
+                            fi
+                            sleep 10
+                        done
+                        echo "!!! NLB did not become healthy within timeout"
+                        exit 1
+                    '''
+                }
+            }
+        }
+
+        stage('Smoke tests') {
+            when {
+                expression { params.RUN_SMOKE_TESTS }
+            }
+            steps {
+                container('newman') {
+                    // Newman reads the Postman collection and environment file,
+                    // runs assertions, produces JUnit XML for Jenkins.
+                    sh '''
+                        set -eu
+
+                        # Overwrite the baseUrl in the environment file with our discovered NLB
+                        # sed is safer than jq here since we only mutate one value
+                        sed -i "s|http://REPLACE_WITH_API_GATEWAY_NLB_HOSTNAME|${API_GATEWAY_URL}|" \
+                            tests/postman/environments/sit.postman_environment.json
+
+                        newman run tests/postman/vjcloudbank-sit-smoke.postman_collection.json \
+                          --environment tests/postman/environments/sit.postman_environment.json \
+                          --reporters cli,junit \
+                          --reporter-junit-export newman-results.xml \
+                          --color off \
+                          --timeout-request 10000
+                    '''
+                }
+            }
+            post {
+                always {
+                    junit testResults: 'newman-results.xml', allowEmptyResults: false
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "═══════════════════════════════════════════════"
+            echo "SIT DEPLOYMENT SUCCESSFUL"
+            echo "Endpoint: ${env.API_GATEWAY_URL}"
+            echo "Build:    ${BUILD_NUMBER}"
+            echo "═══════════════════════════════════════════════"
+        }
+        failure {
+            echo "═══════════════════════════════════════════════"
+            echo "SIT DEPLOYMENT FAILED"
+            echo "See stage log above for details."
+            echo "═══════════════════════════════════════════════"
+        }
+        cleanup {
+            // Housekeeping
+            deleteDir()
+        }
+    }
+}

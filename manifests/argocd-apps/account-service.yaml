@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: vjcloudbank-account-service
+  name: sit-account-service
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
@@ -17,7 +17,7 @@ spec:
         - ../../values/account-service-values.yaml
   destination:
     server: https://kubernetes.default.svc
-    namespace: vjcloudbank
+    namespace: sit
   syncPolicy:
     automated:
       prune: true

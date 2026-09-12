@@ -23,14 +23,15 @@ env:
     value: "60000"
   - name: RATE_LIMIT_MAX_REQUESTS
     value: "100"
+  # Kubernetes internal DNS — SIT namespace
   - name: USER_SERVICE_URL
-    value: "http://user-service.vjcloudbank.svc.cluster.local:3001"
+    value: "http://user-service.sit.svc.cluster.local:3001"
   - name: ACCOUNT_SERVICE_URL
-    value: "http://account-service.vjcloudbank.svc.cluster.local:3002"
+    value: "http://account-service.sit.svc.cluster.local:3002"
   - name: TRANSACTION_SERVICE_URL
-    value: "http://transaction-service.vjcloudbank.svc.cluster.local:3003"
+    value: "http://transaction-service.sit.svc.cluster.local:3003"
   - name: NOTIFICATION_SERVICE_URL
-    value: "http://notification-service.vjcloudbank.svc.cluster.local:3004"
+    value: "http://notification-service.sit.svc.cluster.local:3004"
 
 secretEnv:
   - envName: JWT_SECRET
