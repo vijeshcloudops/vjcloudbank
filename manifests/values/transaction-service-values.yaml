@@ -2,10 +2,8 @@ name: transaction-service
 image:
   repository: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/transaction-service
   tag: latest
-
 replicaCount: 1
 port: 3003
-
 resources:
   requests:
     memory: "512Mi"
@@ -13,13 +11,11 @@ resources:
   limits:
     memory: "1024Mi"
     cpu: "500m"
-
 env:
   - name: SPRING_PROFILES_ACTIVE
     value: "production"
   - name: PORT
     value: "3003"
-
 secretEnv:
   - envName: DB_HOST
     secretName: transaction-service-secrets
@@ -39,21 +35,18 @@ secretEnv:
   - envName: JWT_SECRET
     secretName: transaction-service-secrets
     secretKey: JWT_SECRET
-
 livenessProbe:
   enabled: true
   path: /api/transactions/health
   port: 3003
   initialDelaySeconds: 60
   periodSeconds: 30
-
 readinessProbe:
   enabled: true
   path: /api/transactions/health
   port: 3003
   initialDelaySeconds: 45
   periodSeconds: 15
-
 service:
   type: ClusterIP
   port: 3003
