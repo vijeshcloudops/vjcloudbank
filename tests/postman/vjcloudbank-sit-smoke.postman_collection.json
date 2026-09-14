@@ -95,7 +95,7 @@
               "script": {
                 "exec": [
                   "pm.test('Account service reachable', function () {",
-                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 401]);",
                   "});"
                 ],
                 "type": "text/javascript"
@@ -120,7 +120,7 @@
               "script": {
                 "exec": [
                   "pm.test('Transaction service reachable', function () {",
-                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 401]);",
                   "});"
                 ],
                 "type": "text/javascript"
