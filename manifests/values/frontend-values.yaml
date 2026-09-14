@@ -2,10 +2,8 @@ name: frontend
 image:
   repository: 135808958462.dkr.ecr.ap-south-1.amazonaws.com/vjcloudbank/frontend
   tag: latest
-
 replicaCount: 1
 port: 80
-
 resources:
   requests:
     memory: "64Mi"
@@ -13,25 +11,20 @@ resources:
   limits:
     memory: "128Mi"
     cpu: "100m"
-
 env: []
-
 secretEnv: []
-
 livenessProbe:
   enabled: true
   path: /
   port: 80
   initialDelaySeconds: 10
   periodSeconds: 30
-
 readinessProbe:
   enabled: true
   path: /
   port: 80
   initialDelaySeconds: 5
   periodSeconds: 10
-
 service:
   type: LoadBalancer
   port: 80
