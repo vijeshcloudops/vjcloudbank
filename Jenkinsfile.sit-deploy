@@ -56,9 +56,6 @@ spec:
           cpu: "500m"
           memory: "512Mi"
     - name: tools
-      # Custom-friendly image with git, curl, yq, kubectl already available
-      # In real BFSI we would maintain our own base image; alpine + adds works
-      # for portfolio scope
       image: alpine/k8s:1.28.3
       command:
         - sleep
@@ -72,7 +69,6 @@ spec:
           cpu: "1000m"
           memory: "1Gi"
     - name: newman
-      # Postman's newman + reporters, ready to run collections
       image: postman/newman:5.3-alpine
       command:
         - sleep
@@ -137,8 +133,6 @@ spec:
         MANIFEST_BRANCH   = 'main'
         ARGOCD_NAMESPACE  = 'argocd'
         SIT_NAMESPACE     = 'sit'
-        // API gateway NLB hostname — captured after ArgoCD sync
-        // Populated dynamically in the "Get SIT endpoint" stage
         API_GATEWAY_URL   = ''
     }
 
@@ -168,9 +162,6 @@ spec:
         stage('Update manifest tags') {
             steps {
                 container('tools') {
-                    // Configure Git identity for the commit
-                    // Credentials for push must be configured in Jenkins:
-                    //   github-manifest-repo (username + token/PAT)
                     withCredentials([
                         usernamePassword(
                             credentialsId: 'github-manifest-repo',
@@ -181,16 +172,15 @@ spec:
                         sh '''
                             set -eux
 
-                            # Clone manifest repo fresh (avoid workspace state issues)
+                            # Clean up any previous clone first
                             rm -rf manifest-repo
+
                             git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/vijeshcloudops/vjcloudbank.git manifest-repo
                             cd manifest-repo
 
                             git config user.email "sit-deploy@vjcloudbank.dev"
                             git config user.name  "SIT Deploy Pipeline"
 
-                            # Function to update image tag for a service
-                            # Uses yq (available in alpine/k8s image) — safe YAML edit
                             update_tag() {
                                 local service_name="$1"
                                 local new_tag="$2"
@@ -208,8 +198,6 @@ spec:
 
                                 echo ">>> Updating ${service_name} -> ${new_tag}"
                                 yq -i ".image.tag = \\"${new_tag}\\"" "$values_file"
-
-                                # Show the change
                                 grep -A 2 "^image:" "$values_file"
                                 echo "---"
                             }
@@ -221,7 +209,6 @@ spec:
                             update_tag "api-gateway"          "${API_GATEWAY_TAG}"
                             update_tag "frontend"             "${FRONTEND_TAG}"
 
-                            # Check if anything actually changed
                             if git diff --quiet; then
                                 echo ">>> No changes to commit — all tags were blank or already current"
                                 exit 0
@@ -250,38 +237,30 @@ Triggered by: ${BUILD_URL}"
         stage('Wait for ArgoCD sync') {
             steps {
                 container('tools') {
-                    // ArgoCD auto-sync polls the Git repo every 3 minutes by default.
-                    // We nudge it via CLI for faster feedback + wait for sync completion.
                     withCredentials([
                         string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_TOKEN')
                     ]) {
                         sh '''
                             set -eux
 
-                            # Get ArgoCD server URL from Ingress (namespace argocd)
-                            # If ArgoCD is exposed via NLB, use that hostname
                             ARGOCD_SERVER=$(kubectl -n argocd get svc argocd-server \
                               -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
 
                             if [ -z "$ARGOCD_SERVER" ]; then
-                                # Fall back to port-forward for internal cluster access
                                 ARGOCD_SERVER="argocd-server.argocd.svc.cluster.local"
                             fi
 
                             echo ">>> ArgoCD server: ${ARGOCD_SERVER}"
 
-                            # ArgoCD CLI is not in the alpine/k8s image — download it
                             curl -sSL -o /tmp/argocd \
                               https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
                             chmod +x /tmp/argocd
 
-                            # Login using auth token
                             /tmp/argocd login "${ARGOCD_SERVER}" \
                               --auth-token "${ARGOCD_TOKEN}" \
                               --insecure \
                               --grpc-web
 
-                            # List of SIT apps that may need syncing
                             SIT_APPS="sit-user-service sit-account-service sit-transaction-service \
                                       sit-notification-service sit-api-gateway sit-frontend"
 
@@ -293,11 +272,15 @@ Triggered by: ${BUILD_URL}"
                                 /tmp/argocd app wait "$app" \
                                   --sync --health \
                                   --timeout 300 \
-                                  --grpc-web || {
-                                      echo "!!! $app did not reach Healthy+Synced within timeout"
-                                      /tmp/argocd app get "$app" --grpc-web
-                                      exit 1
-                                  }
+                                  --grpc-web
+                                RC=$?
+                                # Exit code 20 = already Healthy+Synced, not an error
+                                if [ $RC -ne 0 ] && [ $RC -ne 20 ]; then
+                                    echo "!!! $app did not reach Healthy+Synced within timeout (exit $RC)"
+                                    /tmp/argocd app get "$app" --grpc-web
+                                    exit 1
+                                fi
+                                echo ">>> $app is Healthy and Synced"
                             done
 
                             echo ">>> All SIT apps are Healthy and Synced"
@@ -310,11 +293,9 @@ Triggered by: ${BUILD_URL}"
         stage('Get SIT endpoint') {
             steps {
                 container('tools') {
-                    // Discover the api-gateway NLB hostname from the SIT namespace
                     script {
                         env.API_GATEWAY_URL = sh(
                             script: '''
-                                # Wait up to 5 min for NLB hostname to be assigned
                                 for i in $(seq 1 30); do
                                     HOST=$(kubectl -n sit get svc api-gateway \
                                       -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null)
@@ -339,8 +320,6 @@ Triggered by: ${BUILD_URL}"
         stage('Wait for NLB to serve traffic') {
             steps {
                 container('tools') {
-                    // Even after status shows "Active", NLBs take ~2 min to actually
-                    // pass health checks and start routing traffic. Poll until 200.
                     sh '''
                         set -eux
                         for i in $(seq 1 30); do
@@ -365,13 +344,9 @@ Triggered by: ${BUILD_URL}"
             }
             steps {
                 container('newman') {
-                    // Newman reads the Postman collection and environment file,
-                    // runs assertions, produces JUnit XML for Jenkins.
                     sh '''
                         set -eu
 
-                        # Overwrite the baseUrl in the environment file with our discovered NLB
-                        # sed is safer than jq here since we only mutate one value
                         sed -i "s|http://REPLACE_WITH_API_GATEWAY_NLB_HOSTNAME|${API_GATEWAY_URL}|" \
                             tests/postman/environments/sit.postman_environment.json
 
@@ -407,8 +382,9 @@ Triggered by: ${BUILD_URL}"
             echo "═══════════════════════════════════════════════"
         }
         cleanup {
-            // Housekeeping
-            deleteDir()
+            // Use shell rm instead of deleteDir() to avoid permission errors
+            // when manifest-repo was cloned as root inside the tools container
+            sh 'rm -rf manifest-repo || true'
         }
     }
 }
