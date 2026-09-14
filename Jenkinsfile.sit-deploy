@@ -22,8 +22,8 @@
 // What it does:
 //   1. Update image tags in manifests/values/<service>-values.yaml
 //   2. Commit + push to manifest repo (Git = source of truth)
-//   3. ArgoCD auto-syncs from Git → deploys new images to SIT
-//   4. Pipeline waits for rollout to complete
+//   3. ArgoCD auto-syncs from Git -> deploys new images to SIT
+//   4. Pipeline polls kubectl until all apps are Synced + Healthy
 //   5. Runs QA's Newman smoke test suite against SIT
 //   6. Publishes results as JUnit XML in Jenkins
 //
@@ -142,9 +142,9 @@ spec:
             steps {
                 container('jnlp') {
                     sh '''
-                        echo "═══════════════════════════════════════"
+                        echo "======================================="
                         echo "SIT Deployment Parameters"
-                        echo "═══════════════════════════════════════"
+                        echo "======================================="
                         echo "Target env:       ${TARGET_ENV}"
                         echo "user-service:     ${USER_SERVICE_TAG:-<unchanged>}"
                         echo "account-service:  ${ACCOUNT_SERVICE_TAG:-<unchanged>}"
@@ -153,7 +153,7 @@ spec:
                         echo "api-gateway:      ${API_GATEWAY_TAG:-<unchanged>}"
                         echo "frontend:         ${FRONTEND_TAG:-<unchanged>}"
                         echo "Run smoke tests:  ${RUN_SMOKE_TESTS}"
-                        echo "═══════════════════════════════════════"
+                        echo "======================================="
                     '''
                 }
             }
@@ -172,7 +172,6 @@ spec:
                         sh '''
                             set -eux
 
-                            # Clean up any previous clone first
                             rm -rf manifest-repo
 
                             git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/vijeshcloudops/vjcloudbank.git manifest-repo
@@ -197,7 +196,7 @@ spec:
                                 fi
 
                                 echo ">>> Updating ${service_name} -> ${new_tag}"
-                                yq -i ".image.tag = \\"${new_tag}\\"" "$values_file"
+                                yq -i ".image.tag = \"${new_tag}\"" "$values_file"
                                 grep -A 2 "^image:" "$values_file"
                                 echo "---"
                             }
@@ -237,55 +236,35 @@ Triggered by: ${BUILD_URL}"
         stage('Wait for ArgoCD sync') {
             steps {
                 container('tools') {
-                    withCredentials([
-                        string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_TOKEN')
-                    ]) {
-                        sh '''
-                            set -eux
+                    sh '''
+                        set -eux
 
-                            ARGOCD_SERVER=$(kubectl -n argocd get svc argocd-server \
-                              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+                        SIT_APPS="sit-user-service sit-account-service sit-transaction-service \
+                                  sit-notification-service sit-api-gateway sit-frontend"
 
-                            if [ -z "$ARGOCD_SERVER" ]; then
-                                ARGOCD_SERVER="argocd-server.argocd.svc.cluster.local"
-                            fi
-
-                            echo ">>> ArgoCD server: ${ARGOCD_SERVER}"
-
-                            curl -sSL -o /tmp/argocd \
-                              https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
-                            chmod +x /tmp/argocd
-
-                            echo "y" | /tmp/argocd login "${ARGOCD_SERVER}" \
-                            --auth-token "${ARGOCD_TOKEN}" \
-                            --plaintext \
-                            --grpc-web
-
-                            SIT_APPS="sit-user-service sit-account-service sit-transaction-service \
-                                      sit-notification-service sit-api-gateway sit-frontend"
-
-                            for app in $SIT_APPS; do
-                                echo ">>> Refreshing app: $app"
-                                /tmp/argocd app get "$app" --grpc-web --refresh || true
-
-                                echo ">>> Waiting for sync: $app"
-                                /tmp/argocd app wait "$app" \
-                                  --sync --health \
-                                  --timeout 300 \
-                                  --grpc-web
-                                RC=$?
-                                # Exit code 20 = already Healthy+Synced, not an error
-                                if [ $RC -ne 0 ] && [ $RC -ne 20 ]; then
-                                    echo "!!! $app did not reach Healthy+Synced within timeout (exit $RC)"
-                                    /tmp/argocd app get "$app" --grpc-web
+                        for app in $SIT_APPS; do
+                            echo ">>> Waiting for $app to be Synced + Healthy..."
+                            for i in $(seq 1 60); do
+                                SYNC=$(kubectl -n argocd get application "$app" \
+                                  -o jsonpath='{.status.sync.status}' 2>/dev/null || echo "Unknown")
+                                HEALTH=$(kubectl -n argocd get application "$app" \
+                                  -o jsonpath='{.status.health.status}' 2>/dev/null || echo "Unknown")
+                                echo "    Attempt $i: sync=$SYNC health=$HEALTH"
+                                if [ "$SYNC" = "Synced" ] && [ "$HEALTH" = "Healthy" ]; then
+                                    echo ">>> $app is Synced + Healthy"
+                                    break
+                                fi
+                                if [ $i -eq 60 ]; then
+                                    echo "!!! $app did not reach Synced+Healthy within 10 minutes"
+                                    kubectl -n argocd get application "$app" -o yaml | tail -40
                                     exit 1
                                 fi
-                                echo ">>> $app is Healthy and Synced"
+                                sleep 10
                             done
+                        done
 
-                            echo ">>> All SIT apps are Healthy and Synced"
-                        '''
-                    }
+                        echo ">>> All SIT apps are Synced and Healthy"
+                    '''
                 }
             }
         }
@@ -369,21 +348,19 @@ Triggered by: ${BUILD_URL}"
 
     post {
         success {
-            echo "═══════════════════════════════════════════════"
+            echo "==============================================="
             echo "SIT DEPLOYMENT SUCCESSFUL"
             echo "Endpoint: ${env.API_GATEWAY_URL}"
             echo "Build:    ${BUILD_NUMBER}"
-            echo "═══════════════════════════════════════════════"
+            echo "==============================================="
         }
         failure {
-            echo "═══════════════════════════════════════════════"
+            echo "==============================================="
             echo "SIT DEPLOYMENT FAILED"
             echo "See stage log above for details."
-            echo "═══════════════════════════════════════════════"
+            echo "==============================================="
         }
         cleanup {
-            // Use shell rm instead of deleteDir() to avoid permission errors
-            // when manifest-repo was cloned as root inside the tools container
             sh 'rm -rf manifest-repo || true'
         }
     }
