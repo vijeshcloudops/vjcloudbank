@@ -133,7 +133,11 @@ spec:
         MANIFEST_BRANCH   = 'main'
         ARGOCD_NAMESPACE  = 'argocd'
         SIT_NAMESPACE     = 'sit'
-        API_GATEWAY_URL   = ''
+        // API_GATEWAY_URL is intentionally NOT declared here.
+        // A declarative environment{} entry is bound via withEnv around the whole
+        // pipeline and shadows any later `env.API_GATEWAY_URL = ...` assignment;
+        // an empty value is also dropped from the child process environment, so the
+        // shell saw 'parameter not set'. It is assigned at runtime in 'Get SIT endpoint'.
     }
 
     stages {
