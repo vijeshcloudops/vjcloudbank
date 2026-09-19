@@ -177,6 +177,7 @@ spec:
                             git clone https://${GIT_USER}:${GIT_TOKEN}@github.com/vijeshcloudops/vjcloudbank.git manifest-repo
                             cd manifest-repo
 
+                            yq --version
                             git config user.email "sit-deploy@vjcloudbank.dev"
                             git config user.name  "SIT Deploy Pipeline"
 
@@ -196,7 +197,7 @@ spec:
                                 fi
 
                                 echo ">>> Updating ${service_name} -> ${new_tag}"
-                                yq -i ".image.tag = \"${new_tag}\"" "$values_file"
+                                NEW_TAG="$new_tag" yq -i '.image.tag = strenv(NEW_TAG)' "$values_file"
                                 grep -A 2 "^image:" "$values_file"
                                 echo "---"
                             }
